@@ -11,7 +11,8 @@ namespace Speaker_Measurement
         private static float rmsdB = 0;
         private static readonly float[] frequencies =
             { 31, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400, 500, 630, 800, 1000, 1250, 1500, 2000, 2500, 3150, 4000, 5000, 6300, 8000, 10000, 12500, 16000 };
-            //{400, 500};
+
+        private static readonly float dynamicRange = 48; // Range of the gain in dB
 
         static void Main(string[] args)
         {
@@ -24,7 +25,7 @@ namespace Speaker_Measurement
             PinkNoiseProvider pinkNoise = new PinkNoiseProvider();
             var waveOut = new WaveOutEvent();
             waveOut.Init(pinkNoise);
-            waveOut.Volume = 0.4f; // Adjust volume level of pink noise
+            waveOut.Volume = 0.3f; // Adjust volume level of pink noise
             waveOut.Play();
 
             Thread.Sleep(1000); // Wait for RMS to stabilize
@@ -45,19 +46,18 @@ namespace Speaker_Measurement
 
             foreach (float frequency in frequencies)
             {
-                //Console.WriteLine($"\nMeasuring RMS at frequency {frequency} Hz...");
+                // Console.WriteLine($"\nMeasuring RMS at frequency {frequency} Hz...");
 
                 // Initial gain guess in dB
                 float gainDb = 0f;
-                float measuredRmsdB;
-                bool rmsMatched = false;
+                int successfulMeasurements = 0; // Count of successful measurements
 
                 // Initialize the sine wave provider once per frequency
                 SineWaveProvider32 sineWave = new SineWaveProvider32(frequency, (float)Math.Pow(10, gainDb / 20), 48000);
                 waveOut.Init(sineWave);
                 waveOut.Play();
 
-                while (!rmsMatched)
+                while (successfulMeasurements < 5) // Continue until 5 successful measurements
                 {
                     // Convert gain dB to amplitude (linear scale)
                     float amplitude = (float)Math.Pow(10, gainDb / 20);
@@ -67,7 +67,7 @@ namespace Speaker_Measurement
                     Thread.Sleep(100); // Wait for RMS to stabilize
 
                     // Capture the RMS dB at this frequency and amplitude
-                    measuredRmsdB = rmsdB;
+                    float measuredRmsdB = rmsdB;
 
                     Console.Write($"\rFrequency: {frequency,6:F0} Hz | Gain: {gainDb,6:F2} dB | Amplitude: {amplitude,6:F2} | RMS dB: {measuredRmsdB,6:F2} dB");
 
@@ -76,31 +76,34 @@ namespace Speaker_Measurement
 
                     if (Math.Abs(difference) <= tolerance)
                     {
-                        rmsMatched = true; // Exit loop if within tolerance
+                        successfulMeasurements++; // Increment count of successful measurements
                     }
                     else
                     {
+                        // Reset successful measurement count on failure
+                        successfulMeasurements = 0;
+
                         // Adjust gain in dB based on whether RMS is too high or too low
                         gainDb += difference > 0 ? -0.5f : 0.5f;
-                    }
 
-                    // Limit the gain to prevent exceeding the ±12 dB range
-                    if (gainDb > 12.0f)
-                    {
-                        gainDb = 12.0f;
-                        rmsMatched = true;
-                    }
-                    else if (gainDb < -12.0f)
-                    {
-                        gainDb = -12.0f;
-                        rmsMatched = true;
+                        // Limit the gain to prevent exceeding the ±12 dB range
+                        if (gainDb > dynamicRange)
+                        {
+                            gainDb = dynamicRange;
+                            successfulMeasurements = 5; // Exit loop if gain is out of range
+                        }
+                        else if (gainDb < -dynamicRange)
+                        {
+                            gainDb = -dynamicRange;
+                            successfulMeasurements = 5; // Exit loop if gain is out of range
+                        }
                     }
                 }
 
                 // Stop the current wave output after matching RMS
                 waveOut.Stop();
                 Console.WriteLine();
-                //Console.WriteLine($"Final gain at {frequency} Hz to match target RMS dB: {gainDb:F2} dB");
+                //Console.WriteLine($"\nSuccessfully measured {successfulMeasurements} times at {frequency} Hz.");
             }
 
             microphoneRMSReader.Stop();
